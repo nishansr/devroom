@@ -1,0 +1,75 @@
+{
+  "name": "devroom",
+  "displayName": "DevRoom",
+  "description": "Real-time chat rooms for developers inside VS Code",
+  "version": "1.0.0",
+  "publisher": "nishan-bishwokarma",
+  "engines": {
+    "vscode": "^1.70.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [
+    "*"
+  ],
+  "main": "./dist/extension.js",
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "devroom",
+          "title": "DevRoom",
+          "icon": "media/chat-icon.svg"
+        }
+      ]
+    },
+    "views": {
+      "devroom": [
+        {
+          "type": "webview",
+          "id": "devroom.mainView",
+          "name": "DevRoom"
+        }
+      ]
+    },
+    "commands": [
+      {
+        "command": "devroom.createRoom",
+        "title": "DevRoom: Create Room"
+      },
+      {
+        "command": "devroom.joinRoom",
+        "title": "DevRoom: Join Room"
+      }
+    ]
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run build",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "build": "node esbuild.js",
+    "build:server": "cd server && npm install",
+    "start:server": "cd server && npm start",
+    "pretest": "npm run compile && npm run lint",
+    "lint": "eslint src",
+    "test": "vscode-test",
+    "package": "vsce package"
+  },
+  "devDependencies": {
+    "@types/vscode": "^1.70.0",
+    "@types/mocha": "^10.0.10",
+    "@types/node": "18.x",
+    "@types/ws": "^8.5.10",
+    "typescript-eslint": "^8.46.3",
+    "eslint": "^9.39.1",
+    "typescript": "^5.9.3",
+    "@vscode/test-cli": "^0.0.12",
+    "@vscode/test-electron": "^2.5.2",
+    "esbuild": "^0.19.12",
+    "@vscode/vsce": "^2.22.0"
+  },
+  "dependencies": {
+    "ws": "^8.16.0"
+  }
+}
