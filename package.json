@@ -3,7 +3,27 @@
   "displayName": "DevRoom",
   "description": "Real-time chat rooms for developers inside VS Code",
   "version": "1.0.0",
-  "publisher": "nishan-bishwokarma",
+  "publisher": "NishanBishwokarma",
+  "author": {
+    "name": "Nishan Bishwokarma"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/nishansr/devroom"
+  },
+  "bugs": {
+    "url": "https://github.com/nishansr/devroom/issues"
+  },
+  "homepage": "https://github.com/nishansr/devroom#readme",
+  "keywords": [
+    "chat",
+    "collaboration",
+    "messaging",
+    "real-time",
+    "websocket",
+    "developers",
+    "team"
+  ],
   "engines": {
     "vscode": "^1.70.0"
   },

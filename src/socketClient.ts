@@ -23,7 +23,7 @@ export class SocketClient {
     ) {
         // Default to localhost for development
         // In production, set via environment variable or configuration
-        this.serverUrl = process.env.DEVROOM_SERVER_URL || 'ws://localhost:3000';
+        this.serverUrl = process.env.DEVROOM_SERVER_URL || 'wss://devroom-server.onrender.com';
     }
 
     public connect() {

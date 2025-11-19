@@ -56,7 +56,7 @@ export class ChatPanel {
                             type: 'connect',
                             roomId: this._roomId,
                             userId: this._userId,
-                            serverUrl: process.env.DEVROOM_SERVER_URL || 'ws://localhost:3000'
+                            serverUrl: process.env.DEVROOM_SERVER_URL || 'wss://devroom-server.onrender.com'
                         });
                         break;
                     case 'updateName':
