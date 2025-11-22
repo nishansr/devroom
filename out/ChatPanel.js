@@ -35,13 +35,11 @@ var __importStar = (this && this.__importStar) || (function () {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.ChatPanel = void 0;
 const vscode = __importStar(require("vscode"));
-const socketClient_1 = require("./socketClient");
 class ChatPanel {
     static currentPanels = new Map();
     _panel;
     _extensionUri;
     _disposables = [];
-    _socketClient;
     _roomId;
     _userId;
     static createOrShow(extensionUri, roomId) {
@@ -61,48 +59,45 @@ class ChatPanel {
         this._panel = panel;
         this._extensionUri = extensionUri;
         this._roomId = roomId;
-        this._userId = this._generateUserId();
+        this._userId = this._getUserId();
         this._panel.webview.html = this._getHtmlForWebview(this._panel.webview);
         this._panel.onDidDispose(() => this.dispose(), null, this._disposables);
         this._panel.webview.onDidReceiveMessage(message => {
             switch (message.type) {
                 case 'send':
-                    this._sendMessage(message.text);
+                    // Forward to webview to handle WebSocket
+                    this._panel.webview.postMessage({
+                        type: 'sendMessage',
+                        text: message.text
+                    });
                     break;
                 case 'ready':
-                    this._connectToRoom();
+                    // Send connection info to webview
+                    this._panel.webview.postMessage({
+                        type: 'connect',
+                        roomId: this._roomId,
+                        userId: this._userId,
+                        serverUrl: process.env.DEVROOM_SERVER_URL || 'wss://devroom-server.onrender.com'
+                    });
+                    break;
+                case 'updateName':
+                    // Update userId when user changes name
+                    this._userId = message.newName;
                     break;
             }
         }, null, this._disposables);
-        this._socketClient = new socketClient_1.SocketClient(roomId, this._userId, (msg) => this._handleIncomingMessage(msg), (status) => this._handleConnectionStatus(status));
     }
-    _connectToRoom() {
-        this._socketClient.connect();
-    }
-    _generateUserId() {
-        return 'user_' + Math.random().toString(36).substring(2, 9);
-    }
-    _sendMessage(text) {
-        if (!text.trim()) {
-            return;
+    _getUserId() {
+        // Try to get VS Code username from environment
+        const username = process.env.USER || process.env.USERNAME || process.env.LOGNAME;
+        if (username) {
+            return username;
         }
-        this._socketClient.sendMessage(text);
-    }
-    _handleIncomingMessage(message) {
-        this._panel.webview.postMessage({
-            type: 'message',
-            message: message
-        });
-    }
-    _handleConnectionStatus(status) {
-        this._panel.webview.postMessage({
-            type: 'status',
-            status: status
-        });
+        // Fallback to random ID
+        return 'user_' + Math.random().toString(36).substring(2, 9);
     }
     dispose() {
         ChatPanel.currentPanels.delete(this._roomId);
-        this._socketClient.disconnect();
         this._panel.dispose();
         while (this._disposables.length) {
             const disposable = this._disposables.pop();
@@ -119,7 +114,7 @@ class ChatPanel {
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${webview.cspSource} 'unsafe-inline'; script-src 'nonce-${nonce}';">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${webview.cspSource} 'unsafe-inline'; script-src 'nonce-${nonce}'; connect-src wss://devroom-server.onrender.com ws://localhost:*;">
     <link href="${styleUri}" rel="stylesheet">
     <title>Chat — ${this._roomId}</title>
 </head>
@@ -127,9 +122,19 @@ class ChatPanel {
     <div class="chat-container">
         <div class="chat-header">
             <h3>Room: ${this._roomId}</h3>
-            <div class="status" id="status">
-                <span class="status-dot"></span>
-                <span class="status-text">Connecting...</span>
+            <div class="header-actions">
+                <div class="status" id="status">
+                    <span class="status-dot"></span>
+                    <span class="status-text">Connecting...</span>
+                </div>
+                <button class="settings-btn" id="settingsBtn" title="Settings">⚙️</button>
+                <div class="settings-menu" id="settingsMenu">
+                    <div class="settings-item">
+                        <label>Your Name:</label>
+                        <input type="text" id="usernameInput" placeholder="Enter your name" />
+                    </div>
+                    <button class="save-btn" id="saveNameBtn">Save</button>
+                </div>
             </div>
         </div>
         <div class="messages" id="messages"></div>
@@ -147,18 +152,169 @@ class ChatPanel {
         const statusDot = statusDiv.querySelector('.status-dot');
         const statusText = statusDiv.querySelector('.status-text');
 
+        let ws = null;
+        let roomId = null;
+        let userId = null;
+        let serverUrl = null;
+        let reconnectTimer = null;
+        let isIntentionalDisconnect = false;
+
+        const settingsBtn = document.getElementById('settingsBtn');
+        const settingsMenu = document.getElementById('settingsMenu');
+        const usernameInput = document.getElementById('usernameInput');
+        const saveNameBtn = document.getElementById('saveNameBtn');
+
+        // Toggle settings menu
+        settingsBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            settingsMenu.classList.toggle('show');
+            if (settingsMenu.classList.contains('show')) {
+                usernameInput.value = userId;
+                usernameInput.focus();
+            }
+        });
+
+        // Close menu when clicking outside
+        document.addEventListener('click', (e) => {
+            if (!settingsMenu.contains(e.target) && e.target !== settingsBtn) {
+                settingsMenu.classList.remove('show');
+            }
+        });
+
+        // Save name
+        saveNameBtn.addEventListener('click', () => {
+            const newName = usernameInput.value.trim();
+            if (newName && newName !== userId) {
+                const oldUserId = userId;
+                userId = newName;
+                settingsMenu.classList.remove('show');
+                
+                // Notify extension about name change
+                vscode.postMessage({ type: 'updateName', newName: userId });
+                
+                // Show notification
+                const statusText = document.querySelector('.status-text');
+                const oldText = statusText.textContent;
+                statusText.textContent = 'Name updated to ' + userId + '!';
+                setTimeout(() => {
+                    statusText.textContent = oldText;
+                }, 2000);
+
+                // Rejoin with new name if connected
+                if (ws && ws.readyState === WebSocket.OPEN) {
+                    send({
+                        type: 'join',
+                        roomId: roomId,
+                        senderId: userId
+                    });
+                }
+                
+                // Update existing messages to reflect new name
+                document.querySelectorAll('.message.own .sender').forEach(el => {
+                    el.textContent = 'You';
+                });
+            }
+        });
+
+        // Save on Enter key
+        usernameInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') {
+                saveNameBtn.click();
+            }
+        });
+
         // Notify extension that webview is ready
         vscode.postMessage({ type: 'ready' });
 
+        function connectWebSocket() {
+            if (!roomId || !serverUrl) {
+                return;
+            }
+
+            isIntentionalDisconnect = false;
+            updateStatus('reconnecting', 'Connecting...');
+
+            try {
+                ws = new WebSocket(serverUrl + '/room/' + roomId);
+
+                ws.onopen = () => {
+                    updateStatus('connected', 'Connected');
+                    messageInput.disabled = false;
+                    sendBtn.disabled = false;
+
+                    // Send join message
+                    send({
+                        type: 'join',
+                        roomId: roomId,
+                        senderId: userId
+                    });
+                };
+
+                ws.onmessage = (event) => {
+                    try {
+                        const message = JSON.parse(event.data);
+                        if (message.type === 'message') {
+                            addMessage(message.data);
+                        }
+                    } catch (error) {
+                        console.error('Error parsing message:', error);
+                    }
+                };
+
+                ws.onclose = () => {
+                    updateStatus('disconnected', 'Disconnected');
+                    messageInput.disabled = true;
+                    sendBtn.disabled = true;
+                    scheduleReconnect();
+                };
+
+                ws.onerror = (error) => {
+                    console.error('WebSocket error:', error);
+                    updateStatus('error', 'Connection Error');
+                };
+            } catch (error) {
+                console.error('Failed to connect:', error);
+                updateStatus('error', 'Connection Failed');
+                scheduleReconnect();
+            }
+        }
+
+        function send(data) {
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify(data));
+            }
+        }
+
         function sendMessage() {
             const text = messageInput.value.trim();
-            if (text) {
-                vscode.postMessage({
-                    type: 'send',
-                    text: text
-                });
-                messageInput.value = '';
+            if (!text || !ws || ws.readyState !== WebSocket.OPEN) {
+                return;
             }
+
+            send({
+                type: 'message',
+                data: {
+                    roomId: roomId,
+                    senderId: userId,
+                    text: text,
+                    time: Date.now()
+                }
+            });
+
+            messageInput.value = '';
+        }
+
+        function scheduleReconnect() {
+            if (isIntentionalDisconnect || reconnectTimer) {
+                return;
+            }
+
+            updateStatus('reconnecting', 'Reconnecting in 5s...');
+
+            reconnectTimer = setTimeout(() => {
+                reconnectTimer = null;
+                connectWebSocket();
+            }, 5000);
         }
 
         sendBtn.addEventListener('click', sendMessage);
@@ -169,26 +325,44 @@ class ChatPanel {
             }
         });
 
+        // Cleanup on unload
+        window.addEventListener('beforeunload', () => {
+            isIntentionalDisconnect = true;
+            if (reconnectTimer) {
+                clearTimeout(reconnectTimer);
+            }
+            if (ws) {
+                ws.close();
+            }
+        });
+
         window.addEventListener('message', event => {
             const message = event.data;
             
             switch (message.type) {
-                case 'message':
-                    addMessage(message.message);
+                case 'connect':
+                    roomId = message.roomId;
+                    userId = message.userId;
+                    serverUrl = message.serverUrl;
+                    connectWebSocket();
                     break;
-                case 'status':
-                    updateStatus(message.status);
+                case 'sendMessage':
+                    // This is for compatibility if needed
                     break;
             }
         });
 
         function addMessage(msg) {
             const messageEl = document.createElement('div');
-            messageEl.className = 'message';
+            const isOwn = msg.senderId === userId;
+            messageEl.className = 'message ' + (isOwn ? 'own' : 'other');
             
             const senderEl = document.createElement('div');
             senderEl.className = 'sender';
-            senderEl.textContent = msg.senderId;
+            senderEl.textContent = isOwn ? 'You' : msg.senderId;
+            
+            const bubbleEl = document.createElement('div');
+            bubbleEl.className = 'message-bubble';
             
             const textEl = document.createElement('div');
             textEl.className = 'text';
@@ -199,24 +373,17 @@ class ChatPanel {
             timeEl.textContent = formatTime(msg.time);
             
             messageEl.appendChild(senderEl);
-            messageEl.appendChild(textEl);
+            bubbleEl.appendChild(textEl);
+            messageEl.appendChild(bubbleEl);
             messageEl.appendChild(timeEl);
             
             messagesDiv.appendChild(messageEl);
             messagesDiv.scrollTop = messagesDiv.scrollHeight;
         }
 
-        function updateStatus(status) {
+        function updateStatus(status, text) {
             statusDot.className = 'status-dot ' + status;
-            
-            const statusTexts = {
-                'connected': 'Connected',
-                'disconnected': 'Disconnected',
-                'reconnecting': 'Reconnecting...',
-                'error': 'Connection Error'
-            };
-            
-            statusText.textContent = statusTexts[status] || status;
+            statusText.textContent = text || status;
         }
 
         function formatTime(timestamp) {
