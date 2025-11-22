@@ -2,7 +2,7 @@
   "name": "devroom",
   "displayName": "DevRoom",
   "description": "Real-time chat rooms for developers inside VS Code",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "publisher": "NishanBishwokarma",
   "author": {
     "name": "Nishan Bishwokarma"
